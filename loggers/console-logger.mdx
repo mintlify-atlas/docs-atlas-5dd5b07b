@@ -1,0 +1,78 @@
+---
+title: "ConsoleLogger: print log output to stdout in Swift"
+description: "ConsoleLogger prints log messages to standard output using Swift's print function, with optional level filtering and custom formatting via LogFormattable."
+---
+
+`ConsoleLogger` is the simplest logger in Puppy. It writes every log message to standard output using Swift's `print` function, making it ideal for development, debugging, and any environment where you can read process output directly. It conforms to `Loggerable` and dispatches all log calls through an internal `DispatchQueue` named after its label, so logging is non-blocking on the calling thread.
+
+## Initializer
+
+```swift
+ConsoleLogger(_ label: String, logLevel: LogLevel = .trace, logFormat: LogFormattable? = nil)
+```
+
+<ParamField path="label" type="String" required>
+  A unique identifier for this logger instance. Puppy uses this string as the label for the internal `DispatchQueue`, so a reverse-domain-name style value (e.g. `"com.example.yourapp.console"`) is recommended to avoid queue label collisions.
+</ParamField>
+
+<ParamField path="logLevel" type="LogLevel" default=".trace">
+  The minimum log level this logger will process. Messages below this level are dropped before reaching the output. Available levels in ascending severity: `.trace`, `.verbose`, `.debug`, `.info`, `.notice`, `.warning`, `.error`, `.critical`.
+</ParamField>
+
+<ParamField path="logFormat" type="LogFormattable?" default="nil">
+  An optional custom formatter. When `nil`, messages are passed through as-is. Provide a type conforming to `LogFormattable` to control the exact string written to standard output — useful for adding timestamps, thread IDs, or colorization.
+</ParamField>
+
+## Usage
+
+<Steps>
+  <Step title="Create the logger">
+    Instantiate `ConsoleLogger` with a label and your desired minimum log level.
+
+    ```swift
+    import Puppy
+
+    let console = ConsoleLogger("com.example.yourapp.console", logLevel: .info)
+    ```
+  </Step>
+  <Step title="Add it to Puppy">
+    Pass the logger to a `Puppy` instance and start logging.
+
+    ```swift
+    let puppy = Puppy(loggers: [console])
+
+    puppy.debug("DEBUG message")  // Dropped — below .info
+    puppy.info("INFO message")    // Printed to stdout
+    puppy.error("ERROR message")  // Printed to stdout
+    ```
+  </Step>
+  <Step title="Use a custom format (optional)">
+    Supply a `LogFormattable` to control the output structure.
+
+    ```swift
+    struct LogFormatter: LogFormattable {
+        func formatMessage(_ level: LogLevel, message: String, tag: String, function: String,
+                           file: String, line: UInt, swiftLogInfo: [String: String],
+                           label: String, date: Date, threadID: UInt64) -> String {
+            return "[\(level)] \(message)"
+        }
+    }
+
+    let console = ConsoleLogger(
+        "com.example.yourapp.console",
+        logLevel: .debug,
+        logFormat: LogFormatter()
+    )
+    ```
+  </Step>
+</Steps>
+
+## Notes
+
+<Note>
+  `ConsoleLogger` conforms to the `Loggerable` protocol, which means it can be composed with any other Puppy logger (e.g. `FileLogger`, `OSLogger`) in the same `Puppy` instance. Each logger independently filters messages by its own `logLevel`.
+</Note>
+
+<Tip>
+  During development, pairing `ConsoleLogger` with a colored `LogFormattable` makes it easy to scan log output by level. `LogLevel` exposes `.color` and `.emoji` properties you can use in your formatter.
+</Tip>

@@ -1,0 +1,152 @@
+---
+title: "Installing the Puppy Swift logging library quickly"
+description: "Add Puppy via Swift Package Manager, CocoaPods, or Carthage. Covers platform minimums: macOS 10.15, iOS 13, tvOS 13, watchOS 6, and visionOS 1."
+---
+
+Puppy supports three package managers. Swift Package Manager is the recommended approach for most projects because it is built into Swift and Xcode, requires no extra tooling, and works on all of Puppy's supported platforms. CocoaPods and Carthage are available for projects that already use them.
+
+## Platform requirements
+
+Puppy requires the following minimum deployment targets:
+
+| Platform | Minimum version |
+|----------|----------------|
+| macOS | 10.15 |
+| iOS | 13.0 |
+| tvOS | 13.0 |
+| watchOS | 6.0 |
+| visionOS | 1.0 |
+| Linux | Any supported Swift toolchain |
+| Windows | Any supported Swift toolchain |
+
+## Choose your package manager
+
+<CodeGroup>
+
+```swift Swift Package Manager
+// In Package.swift — add to your dependencies array:
+.package(url: "https://github.com/sushichop/Puppy.git", from: "0.9.0"),
+
+// Then add to each target that uses Puppy:
+.product(name: "Puppy", package: "Puppy"),
+```
+
+```ruby CocoaPods
+# In your Podfile:
+pod 'Puppy'
+```
+
+```text Carthage
+# In your Cartfile:
+github "sushichop/Puppy"
+```
+
+</CodeGroup>
+
+## Swift Package Manager walkthrough
+
+Swift Package Manager is integrated into Xcode and the Swift command-line toolchain, making it the simplest way to add Puppy.
+
+<Steps>
+  <Step title="Declare the dependency">
+    Open your `Package.swift` file and add Puppy to the `dependencies` array. The full file should look similar to this:
+
+    ```swift
+    // swift-tools-version:5.9
+    import PackageDescription
+
+    let package = Package(
+        name: "MyApp",
+        platforms: [
+            .macOS(.v10_15), .iOS(.v13),
+        ],
+        dependencies: [
+            .package(url: "https://github.com/sushichop/Puppy.git", from: "0.9.0"),
+        ],
+        targets: [
+            .target(
+                name: "MyApp",
+                dependencies: [
+                    .product(name: "Puppy", package: "Puppy"),
+                ]
+            ),
+        ]
+    )
+    ```
+  </Step>
+  <Step title="Add Puppy to your target">
+    Make sure each target that imports Puppy lists `.product(name: "Puppy", package: "Puppy")` in its `dependencies` array, as shown in the example above. Test targets that use Puppy directly need the same entry.
+  </Step>
+  <Step title="Resolve packages">
+    Run the following command from your package root, or use **File → Packages → Resolve Package Versions** in Xcode:
+
+    ```bash
+    swift package resolve
+    ```
+
+    Swift downloads Puppy and pins the resolved version in `Package.resolved`.
+  </Step>
+  <Step title="Import and use Puppy">
+    Add `import Puppy` at the top of any Swift file where you want to use the library:
+
+    ```swift
+    import Puppy
+
+    let console = ConsoleLogger("com.example.app.console", logLevel: .info)
+    let puppy = Puppy(loggers: [console])
+    puppy.info("Puppy is ready")
+    ```
+  </Step>
+</Steps>
+
+## CocoaPods
+
+CocoaPods version 1.16.0 or later is required.
+
+<Steps>
+  <Step title="Add Puppy to your Podfile">
+    ```ruby
+    target 'MyApp' do
+      pod 'Puppy'
+    end
+    ```
+  </Step>
+  <Step title="Install the pod">
+    ```bash
+    pod install
+    ```
+
+    Open the generated `.xcworkspace` file in Xcode.
+  </Step>
+  <Step title="Import and use Puppy">
+    ```swift
+    import Puppy
+
+    let console = ConsoleLogger("com.example.app.console", logLevel: .info)
+    let puppy = Puppy(loggers: [console])
+    puppy.info("Puppy is ready")
+    ```
+  </Step>
+</Steps>
+
+## Carthage
+
+<Steps>
+  <Step title="Add Puppy to your Cartfile">
+    ```text
+    github "sushichop/Puppy"
+    ```
+  </Step>
+  <Step title="Build the framework">
+    ```bash
+    carthage update --use-xcframeworks
+    ```
+  </Step>
+  <Step title="Link the framework">
+    Drag the built `Puppy.xcframework` from `Carthage/Build` into your Xcode target's **Frameworks, Libraries, and Embedded Content** section.
+  </Step>
+</Steps>
+
+<Note>
+  Syslog support (`SystemLogger`) is only available on Linux. OSLog support (`OSLogger`) is only available on Darwin platforms. Both `ConsoleLogger` and `FileLogger` work on all platforms.
+</Note>

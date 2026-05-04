@@ -1,0 +1,93 @@
+---
+title: "SystemLogger: route Swift log output to Linux syslog"
+description: "SystemLogger sends Puppy log messages to the system syslog daemon on Linux, integrating your Swift application with standard Linux log infrastructure."
+---
+
+`SystemLogger` routes log messages to the Linux `syslog` daemon via the C `syslog()` function (wrapped as `cpuppy_syslog`). Logged messages appear in the system journal (e.g. via `journalctl`) and in any syslog-compatible log aggregator connected to the host. It is a thin adapter that maps Puppy's eight log levels to the six syslog priorities that most closely match their semantics.
+
+<Warning>
+  `SystemLogger` is only available on Linux. It is compiled conditionally with `#if os(Linux)` and is not available on macOS, iOS, or Windows. Use `OSLogger` on Darwin platforms and `ConsoleLogger` or `FileLogger` on Windows.
+</Warning>
+
+## Initializer
+
+```swift
+SystemLogger(_ label: String, logLevel: LogLevel = .trace, logFormat: LogFormattable? = nil)
+```
+
+<ParamField path="label" type="String" required>
+  A unique identifier for this logger, used as the internal `DispatchQueue` label. Use reverse-domain-name style (e.g. `"com.example.yourapp.syslog"`) to avoid queue label collisions across multiple logger instances.
+</ParamField>
+
+<ParamField path="logLevel" type="LogLevel" default=".trace">
+  The minimum severity required for a message to be forwarded to syslog. Messages below this level are dropped.
+</ParamField>
+
+<ParamField path="logFormat" type="LogFormattable?" default="nil">
+  An optional formatter applied to each message string before it is passed to `syslog`. When `nil`, the raw message string is used.
+</ParamField>
+
+## Log level mapping
+
+Puppy's eight levels are mapped to syslog priorities as follows:
+
+| Puppy level | syslog priority |
+|---|---|
+| `.trace` | `LOG_DEBUG` |
+| `.verbose` | `LOG_DEBUG` |
+| `.debug` | `LOG_DEBUG` |
+| `.info` | `LOG_INFO` |
+| `.notice` | `LOG_NOTICE` |
+| `.warning` | `LOG_WARNING` |
+| `.error` | `LOG_ERR` |
+| `.critical` | `LOG_CRIT` |
+
+<Note>
+  `syslog` does not have direct equivalents for Puppy's `.trace` and `.verbose` levels, so both are mapped to `LOG_DEBUG`. If you need to distinguish them in log output, use a custom `LogFormattable` that includes the Puppy level string in the message body.
+</Note>
+
+## Usage
+
+<Steps>
+  <Step title="Create the logger">
+    ```swift
+    import Puppy
+
+    let syslog = SystemLogger("com.example.yourapp.syslog", logLevel: .info)
+    ```
+  </Step>
+  <Step title="Add it to Puppy and log">
+    ```swift
+    let puppy = Puppy(loggers: [syslog])
+
+    puppy.info("Service started")
+    puppy.critical("Disk quota exceeded")
+    ```
+  </Step>
+  <Step title="Use with swift-log (optional)">
+    `SystemLogger` can back `apple/swift-log` alongside other transports.
+
+    ```swift
+    import Puppy
+    import Logging
+
+    let console = ConsoleLogger("com.example.yourapp.console")
+    let syslog = SystemLogger("com.example.yourapp.syslog")
+
+    let puppy = Puppy(loggers: [console, syslog])
+
+    LoggingSystem.bootstrap {
+        var handler = PuppyLogHandler(label: $0, puppy: puppy)
+        handler.logLevel = .trace
+        return handler
+    }
+
+    var log = Logger(label: "com.example.yourapp.swiftlog")
+    log.notice("Ready")
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  On most Linux distributions, messages logged at `LOG_DEBUG` and `LOG_INFO` are not written to the system journal by default. Check your `syslog` or `journald` configuration (e.g. `MaxLevelStore` in `/etc/systemd/journald.conf`) if lower-severity messages are not appearing.
+</Tip>

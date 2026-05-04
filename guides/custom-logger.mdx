@@ -1,0 +1,145 @@
+---
+title: "Build a custom Swift logger with Puppy's Loggerable"
+description: "Learn how to implement the Loggerable protocol to send Puppy log output to any destination—a remote server, database, analytics service, or custom sink."
+---
+
+Puppy ships with console, file, syslog, and oslog transports, but sometimes you need to route logs somewhere else entirely: a remote analytics service, a database, an in-memory ring buffer for testing, or a platform-specific sink. The `Loggerable` protocol is the extension point for all of these cases. Any type that conforms to `Loggerable` can be added to a `Puppy` instance and will receive log events alongside the built-in loggers.
+
+## The Loggerable protocol
+
+```swift
+public protocol Loggerable: Sendable {
+    var label: String { get }
+    var queue: DispatchQueue { get }
+    var logLevel: LogLevel { get }
+    var logFormat: LogFormattable? { get }
+
+    func pickMessage(_ level: LogLevel, message: String, tag: String, function: String,
+                     file: String, line: UInt, swiftLogInfo: [String: String],
+                     label: String, date: Date, threadID: UInt64)
+
+    func log(_ level: LogLevel, string: String)
+
+    func flush(completion: @escaping @Sendable () -> Void)
+}
+```
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `label` | `String` | A unique identifier for this logger instance. Used as the `DispatchQueue` label and for deduplication when adding loggers to `Puppy`. |
+| `queue` | `DispatchQueue` | The serial queue on which log writes are dispatched. |
+| `logLevel` | `LogLevel` | The minimum level this logger handles. Events below this level are dropped before `log(_:string:)` is called. |
+| `logFormat` | `LogFormattable?` | An optional formatter. When non-nil, `pickMessage` passes all event context through the formatter before calling `log`. |
+
+### Default implementations
+
+`Loggerable` provides default implementations for two methods so you only need to implement `log(_:string:)`:
+
+**`pickMessage`** — dispatches onto `queue`, applies the minimum level filter, runs the formatter if one is set, and calls `log(_:string:)` with the final string. You do not need to override this unless you want custom dispatch behavior.
+
+**`flush(completion:)`** — dispatches `completion` onto `queue` using `queue.async`. This ensures all previously enqueued log writes complete before the closure runs. Override only if your logger needs a different flush strategy.
+
+The method you **must** implement is `log(_:string:)`. This is where the already-formatted string is delivered and you write it to your destination.
+
+## Complete example
+
+```swift
+@preconcurrency import Dispatch
+import Puppy
+
+public struct CustomLogger: Loggerable {
+    public let label: String
+    public let queue: DispatchQueue
+    public let logLevel: LogLevel
+    public let logFormat: LogFormattable?
+
+    public init(_ label: String, logLevel: LogLevel = .trace, logFormat: LogFormattable? = nil) {
+        self.label = label
+        self.queue = DispatchQueue(label: label)
+        self.logLevel = logLevel
+        self.logFormat = logFormat
+    }
+
+    public func log(_ level: LogLevel, string: String) {
+        // Write `string` to your destination here.
+        // This method is already called on `queue`, so I/O is safe.
+    }
+}
+```
+
+## Implementation workflow
+
+<Steps>
+  <Step title="Define the struct and its stored properties">
+    Use a struct so `Sendable` conformance is straightforward. Declare the four required properties. Initialize `queue` using the same string as `label` so the system identifies the queue by logger name:
+
+    ```swift
+    @preconcurrency import Dispatch
+    import Puppy
+
+    public struct RemoteLogger: Loggerable {
+        public let label: String
+        public let queue: DispatchQueue
+        public let logLevel: LogLevel
+        public let logFormat: LogFormattable?
+
+        public init(_ label: String, logLevel: LogLevel = .info, logFormat: LogFormattable? = nil) {
+            self.label = label
+            self.queue = DispatchQueue(label: label)
+            self.logLevel = logLevel
+            self.logFormat = logFormat
+        }
+    }
+    ```
+  </Step>
+  <Step title="Implement log(_:string:)">
+    This is the only method you must provide. The `string` parameter already contains the fully formatted log line. Write it to your destination:
+
+    ```swift
+    public func log(_ level: LogLevel, string: String) {
+        // Example: forward to a remote endpoint
+        sendToServer(string)
+    }
+    ```
+
+    <Note>
+    `log(_:string:)` is always called from within `queue`. You can perform synchronous I/O safely without additional dispatching.
+    </Note>
+  </Step>
+  <Step title="Choose a unique label">
+    The `label` value is used as the `DispatchQueue` label for this logger. Use reverse-domain notation to guarantee uniqueness across your application and any third-party loggers:
+
+    ```swift
+    let remote = RemoteLogger("com.example.yourapp.remote", logLevel: .warning)
+    ```
+
+    Puppy deduplicates loggers by label — adding two loggers with the same label keeps only the first.
+  </Step>
+  <Step title="Add the logger to Puppy">
+    Create a `Puppy` instance and add your logger alongside any built-in ones:
+
+    ```swift
+    let console = ConsoleLogger("com.example.yourapp.console", logLevel: .debug)
+    let remote = RemoteLogger("com.example.yourapp.remote", logLevel: .warning)
+
+    var puppy = Puppy(loggers: [console, remote])
+    puppy.info("Application started")
+    ```
+  </Step>
+  <Step title="Optionally attach a formatter">
+    Pass any `LogFormattable` conformer to control the string your logger receives:
+
+    ```swift
+    let formatter = LogFormatter()
+    let remote = RemoteLogger("com.example.yourapp.remote",
+                              logLevel: .warning,
+                              logFormat: formatter)
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+Every logger label must be unique within a `Puppy` instance. Using the same label for two loggers causes the second one to be silently ignored when added via `puppy.add(_:)`.
+</Warning>

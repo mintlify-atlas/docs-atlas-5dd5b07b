@@ -1,0 +1,173 @@
+---
+title: "FileRotationLogger: automatic Swift log file rotation"
+description: "FileRotationLogger writes to a file and rotates it once a size threshold is hit, archiving previous logs and pruning excess archives automatically."
+---
+
+`FileRotationLogger` extends file-based logging with automatic rotation. Before and after each write, it checks whether the current log file has exceeded `rotationConfig.maxFileSize`. When that threshold is crossed, the active file is archived, older archives are shifted or pruned down to `maxArchivedFilesCount`, and a fresh file is opened. Archived files are named by appending either a numeric suffix (`.1`, `.2`, …) or a timestamp-plus-UUID suffix, depending on your `RotationConfig`. An optional delegate receives callbacks each time a file is archived or deleted.
+
+## Initializer
+
+```swift
+FileRotationLogger(
+    _ label: String,
+    logLevel: LogLevel = .trace,
+    logFormat: LogFormattable? = nil,
+    fileURL: URL,
+    filePermission: String = "640",
+    rotationConfig: RotationConfig,
+    delegate: FileRotationLoggerDelegate? = nil
+) throws
+```
+
+<ParamField path="label" type="String" required>
+  A unique identifier for this logger, used as the internal `DispatchQueue` label. Reverse-domain-name style is recommended (e.g. `"com.example.yourapp.filerotation"`).
+</ParamField>
+
+<ParamField path="logLevel" type="LogLevel" default=".trace">
+  The minimum severity required for a message to be written. Messages below this level are dropped.
+</ParamField>
+
+<ParamField path="logFormat" type="LogFormattable?" default="nil">
+  An optional formatter applied to each message string before it is written to disk.
+</ParamField>
+
+<ParamField path="fileURL" type="URL" required>
+  The absolute URL of the active log file. Must point to a file path, not a directory. Parent directories are created automatically.
+</ParamField>
+
+<ParamField path="filePermission" type="String" default='"640"'>
+  POSIX file permission for the log file as an octal string (`"000"`–`"777"`). Applies to both the active file and newly created files after rotation. An invalid value causes init to throw `FileError.invalidPermission`.
+</ParamField>
+
+<ParamField path="rotationConfig" type="RotationConfig" required>
+  Controls when and how rotation occurs. See [RotationConfig](#rotationconfig) below.
+</ParamField>
+
+<ParamField path="delegate" type="FileRotationLoggerDelegate?" default="nil">
+  An optional delegate that receives notifications after a file is archived or deleted. Useful for uploading, compressing, or auditing archived logs.
+</ParamField>
+
+## RotationConfig
+
+`RotationConfig` is a struct that bundles all rotation policy settings.
+
+```swift
+RotationConfig(
+    suffixExtension: SuffixExtension = .numbering,
+    maxFileSize: ByteCount = 10 * 1024 * 1024,
+    maxArchivedFilesCount: UInt8 = 5
+)
+```
+
+<ParamField path="suffixExtension" type="SuffixExtension" default=".numbering">
+  The naming scheme for archived files.
+
+  - `.numbering` — appends an incrementing integer: `app.log.1`, `app.log.2`, … Older files are shifted up each rotation.
+  - `.date_uuid` — appends an ISO-8601 UTC timestamp plus a UUID: `app.log.20240101T120000Z_<uuid>`. Archived files are never renamed; the oldest are simply deleted when the count exceeds `maxArchivedFilesCount`.
+</ParamField>
+
+<ParamField path="maxFileSize" type="ByteCount" default="10485760">
+  Maximum size in bytes (`UInt64`) before the active log file is rotated. The default is 10 MB (`10 * 1024 * 1024`). Rotation is checked before and after every write.
+</ParamField>
+
+<ParamField path="maxArchivedFilesCount" type="UInt8" default="5">
+  Maximum number of archived log files to retain. When the archive count exceeds this value, the oldest archived files are deleted. Set to `0` to delete all archives immediately after each rotation.
+</ParamField>
+
+## Rotation behavior
+
+Rotation is triggered when the active log file size exceeds `maxFileSize`. The sequence on each rotation is:
+
+<Steps>
+  <Step title="Shift existing archives (numbering only)">
+    Existing numbered archives are renamed upward: `.1` becomes `.2`, `.2` becomes `.3`, and so on.
+  </Step>
+  <Step title="Archive the active file">
+    The active log file is moved to its new archive name. The delegate method `fileRotationLogger(_:didArchiveFileURL:toFileURL:)` is called.
+  </Step>
+  <Step title="Prune excess archives">
+    If the total number of archives exceeds `maxArchivedFilesCount`, the oldest are deleted. The delegate method `fileRotationLogger(_:didRemoveArchivedFileURL:)` is called for each deleted file.
+  </Step>
+  <Step title="Open a fresh file">
+    A new active log file is created at `fileURL` and logging continues.
+  </Step>
+</Steps>
+
+## FileRotationLoggerDelegate
+
+Implement `FileRotationLoggerDelegate` to react to archive and deletion events, for example to upload logs to a remote server or to maintain an audit trail.
+
+```swift
+public protocol FileRotationLoggerDelegate: AnyObject, Sendable {
+    func fileRotationLogger(
+        _ fileRotationLogger: FileRotationLogger,
+        didArchiveFileURL: URL,
+        toFileURL: URL
+    )
+    func fileRotationLogger(
+        _ fileRotationLogger: FileRotationLogger,
+        didRemoveArchivedFileURL: URL
+    )
+}
+```
+
+The delegate is held with a `weak` reference, so you must retain it independently for the lifetime of the logger.
+
+## Usage
+
+The example below mirrors the pattern from the Puppy README, using a `UIViewController` to retain the delegate.
+
+```swift
+import Puppy
+
+class ViewController: UIViewController {
+    let fileURL = URL(fileURLWithPath: "./logs/app.log").absoluteURL
+    let rotationConfig = RotationConfig(
+        suffixExtension: .date_uuid,
+        maxFileSize: 10 * 1024 * 1024,
+        maxArchivedFilesCount: 3
+    )
+    let delegate = LogRotationDelegate()
+    var puppy: Puppy!
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        let fileRotation = try! FileRotationLogger(
+            "com.example.yourapp.filerotation",
+            fileURL: fileURL,
+            rotationConfig: rotationConfig,
+            delegate: delegate
+        )
+
+        puppy = Puppy(loggers: [fileRotation])
+        puppy.info("App launched")
+        puppy.warning("Low memory warning received")
+    }
+}
+
+class LogRotationDelegate: FileRotationLoggerDelegate {
+    func fileRotationLogger(
+        _ fileRotationLogger: FileRotationLogger,
+        didArchiveFileURL: URL,
+        toFileURL: URL
+    ) {
+        print("Archived \(didArchiveFileURL.lastPathComponent) → \(toFileURL.lastPathComponent)")
+    }
+
+    func fileRotationLogger(
+        _ fileRotationLogger: FileRotationLogger,
+        didRemoveArchivedFileURL: URL
+    ) {
+        print("Deleted archive: \(didRemoveArchivedFileURL.lastPathComponent)")
+    }
+}
+```
+
+<Warning>
+  The delegate is stored as a `weak` reference. If you let the delegate instance deallocate, rotation callbacks will silently stop firing. Ensure your delegate object has a strong owner for the full lifetime of the logger.
+</Warning>
+
+<Tip>
+  Use `.numbering` when you want predictable filenames and need to process the most recent archive at a fixed path (e.g. `app.log.1`). Use `.date_uuid` when archives may be shipped to a central store and you need globally unique filenames.
+</Tip>

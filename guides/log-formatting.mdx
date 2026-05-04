@@ -1,0 +1,158 @@
+---
+title: "Customize Puppy log output format with LogFormattable"
+description: "Learn how to implement the LogFormattable protocol to control every detail of your Puppy log output, from timestamps and colors to emoji level indicators."
+---
+
+Puppy separates the act of writing logs from the act of formatting them. The `LogFormattable` protocol lets you define exactly what each log line looks like—timestamp format, color, emoji, thread ID, file name, or any combination you choose—without touching the logger itself. Any logger that accepts a `logFormat` parameter will use your formatter automatically.
+
+## The LogFormattable protocol
+
+Implement `LogFormattable` by providing a single method that receives all available context about a log event and returns the final string to be written:
+
+```swift
+public protocol LogFormattable: Sendable {
+    func formatMessage(_ level: LogLevel, message: String, tag: String, function: String,
+                       file: String, line: UInt, swiftLogInfo: [String : String],
+                       label: String, date: Date, threadID: UInt64) -> String
+}
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `level` | `LogLevel` | The severity of the log event: `.trace`, `.verbose`, `.debug`, `.info`, `.notice`, `.warning`, `.error`, or `.critical`. |
+| `message` | `String` | The raw log message string passed by the caller. |
+| `tag` | `String` | An optional tag string. Empty when not provided by the caller. When using swift-log, this is set to `"swiftlog"`. |
+| `function` | `String` | The name of the function that triggered the log call, captured via `#function`. |
+| `file` | `String` | The source file that triggered the log call, captured via `#fileID`. Includes the module name as a prefix (e.g. `MyApp/ViewController.swift`). |
+| `line` | `UInt` | The line number within `file` where the log call was made. |
+| `swiftLogInfo` | `[String: String]` | Extra metadata from swift-log. Contains `"label"`, `"source"`, and `"metadata"` keys when routing through `PuppyLogHandler`. Empty otherwise. |
+| `label` | `String` | The label of the logger that is processing this message (the same value as the logger's `label` property). |
+| `date` | `Date` | The timestamp of the log event. |
+| `threadID` | `UInt64` | The OS thread ID of the thread that called the log method. |
+
+## Helper functions
+
+`LogFormattable` provides two extension methods to decompose the `file` string:
+
+```swift
+extension LogFormattable {
+    // Returns the module portion of a #fileID string, e.g. "MyApp"
+    public func moduleName(_ file: String) -> String
+
+    // Returns the filename portion of a #fileID string, e.g. "ViewController.swift"
+    public func fileName(_ file: String) -> String
+}
+```
+
+Pass the raw `file` parameter from `formatMessage` directly to these helpers.
+
+## Formatting dates
+
+Two free functions are available for converting a `Date` to a formatted string. Pass a pre-initialized `DateFormatter` to keep formatting performant:
+
+```swift
+// Format using a DateFormatter that is already configured
+@Sendable
+public func dateFormatter(_ date: Date, withFormatter dateFormatter: DateFormatter) -> String
+
+// Format and also configure locale, format string, and time zone on the fly
+@Sendable
+public func dateFormatter(
+    _ date: Date,
+    withFormatter dateFormatter: DateFormatter,
+    locale: String = "en_US_POSIX",
+    dateFormat: String = "yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ",
+    timeZone: String = ""
+) -> String
+```
+
+<Note>
+Initialize `DateFormatter` once (e.g. as a stored property) and reuse it on every call. `DateFormatter` is expensive to create; sharing a single instance keeps log formatting efficient.
+</Note>
+
+## Colors and emoji
+
+`LogLevel` exposes two properties you can use inside `formatMessage`:
+
+- `level.emoji` — a colored circle emoji matching the level (e.g. `🔵` for `.debug`)
+- `level.color` — a `LogColor` value for ANSI terminal colorization
+
+Use the `colorize(_:)` extension on `String` to wrap the output in ANSI escape codes:
+
+```swift
+"your log string".colorize(level.color)
+```
+
+## Complete example
+
+The following formatter produces colored, emoji-prefixed lines with an ISO 8601 timestamp, thread ID, module name, file name, and line number:
+
+```swift
+import Puppy
+
+struct LogFormatter: LogFormattable {
+    private let dateFormat = DateFormatter()
+
+    init() {
+        dateFormat.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ"
+    }
+
+    func formatMessage(_ level: LogLevel, message: String, tag: String, function: String,
+                       file: String, line: UInt, swiftLogInfo: [String : String],
+                       label: String, date: Date, threadID: UInt64) -> String {
+        let date = dateFormatter(date, withFormatter: dateFormat)
+        let fileName = fileName(file)
+        let moduleName = moduleName(file)
+        return "\(date) \(threadID) [\(level.emoji) \(level)] \(swiftLogInfo) \(moduleName)/\(fileName)#L.\(line) \(function) \(message)"
+            .colorize(level.color)
+    }
+}
+```
+
+## Implementation workflow
+
+<Steps>
+  <Step title="Create a struct conforming to LogFormattable">
+    Define a struct (not a class — `Sendable` conformance is simpler for value types). Add a `DateFormatter` stored property and configure it in an `init`:
+
+    ```swift
+    struct LogFormatter: LogFormattable {
+        private let dateFormat = DateFormatter()
+
+        init() {
+            dateFormat.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ"
+        }
+    }
+    ```
+  </Step>
+  <Step title="Implement formatMessage">
+    Use the helper functions and `dateFormatter` free function to compose the output string. Return the final formatted line:
+
+    ```swift
+    func formatMessage(_ level: LogLevel, message: String, tag: String, function: String,
+                       file: String, line: UInt, swiftLogInfo: [String : String],
+                       label: String, date: Date, threadID: UInt64) -> String {
+        let timestamp = dateFormatter(date, withFormatter: dateFormat)
+        let file = fileName(file)
+        return "\(timestamp) [\(level)] \(file)#L.\(line) \(message)"
+    }
+    ```
+  </Step>
+  <Step title="Pass the formatter to a logger">
+    Any built-in Puppy logger accepts a `logFormat` parameter. Pass an instance of your formatter when constructing the logger:
+
+    ```swift
+    import Puppy
+
+    let formatter = LogFormatter()
+    let oslog = OSLogger("com.example.yourapp.oslog", logFormat: formatter)
+    let puppy = Puppy(loggers: [oslog])
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+The same formatter instance can be shared across multiple loggers. Because `LogFormattable` requires `Sendable` conformance and the `DateFormatter` is used inside serial dispatch queues, sharing is safe.
+</Tip>

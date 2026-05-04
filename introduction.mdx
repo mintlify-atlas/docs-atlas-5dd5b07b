@@ -1,0 +1,59 @@
+---
+title: "Puppy: flexible Swift logging across all platforms"
+description: "Learn what Puppy is, which platforms it supports, how its four transport types work, and when to use it as an apple/swift-log backend."
+---
+
+Puppy is a logging library written in Swift that lets you route log output to multiple destinations at the same time. Rather than committing to a single output channel, you compose independent loggers—each with its own log level, format, and dispatch queue—and hand them to a single `Puppy` instance. One call to `puppy.info(...)` delivers the message to every transport you've configured. Puppy runs on Darwin (macOS, iOS, tvOS, watchOS, visionOS), Linux, and Windows, and it works either as a standalone logger or as a backend for `apple/swift-log`.
+
+## Transports
+
+Puppy ships four built-in transport types that cover the most common logging destinations.
+
+<CardGroup cols={2}>
+  <Card title="ConsoleLogger" icon="terminal" href="/loggers/console-logger">
+    Writes log messages to standard output. Works on all supported platforms and is the fastest way to get visibility during development.
+  </Card>
+  <Card title="FileLogger" icon="file-lines" href="/loggers/file-logger">
+    Appends log messages to a file at a path you control. You can set the Unix file permission mode on creation.
+  </Card>
+  <Card title="FileRotationLogger" icon="rotate" href="/loggers/file-rotation-logger">
+    Extends file logging with automatic rotation by size. Archived files can use sequential numbering or date-UUID suffixes, and a delegate lets you react to archive and delete events.
+  </Card>
+  <Card title="OSLogger / SystemLogger" icon="apple" href="/loggers/os-logger">
+    Routes messages through Apple's unified logging system (`os_log`) on Darwin, or the POSIX system log (`syslog`) on Linux.
+  </Card>
+</CardGroup>
+
+## Log levels
+
+Puppy defines eight log levels in ascending severity order. Each logger filters out messages below its configured level.
+
+| Level | Raw value | Typical use |
+|-------|-----------|-------------|
+| `trace` | 1 | Fine-grained execution paths |
+| `verbose` | 2 | Detailed diagnostic output |
+| `debug` | 3 | General debugging information |
+| `info` | 4 | Normal operational events |
+| `notice` | 5 | Notable but expected events |
+| `warning` | 6 | Something unexpected, but recoverable |
+| `error` | 7 | An error that affects an operation |
+| `critical` | 8 | A severe failure requiring immediate attention |
+
+## apple/swift-log backend
+
+If your project already uses `apple/swift-log`, you don't need to change your existing `Logger` calls. Puppy ships a `PuppyLogHandler` that registers with `LoggingSystem.bootstrap`, so every `log.info(...)` call in your code is forwarded through Puppy's transport pipeline automatically.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Add Puppy via Swift Package Manager, CocoaPods, or Carthage.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Set up console and file logging in a few lines of Swift.
+  </Card>
+  <Card title="swift-log integration" icon="link" href="/guides/swift-log-integration">
+    Use PuppyLogHandler to plug Puppy into an existing swift-log project.
+  </Card>
+  <Card title="Custom loggers" icon="cube" href="/guides/custom-logger">
+    Implement the Loggerable protocol to build your own transport.
+  </Card>
+</CardGroup>

@@ -1,0 +1,417 @@
+---
+title: "Puppy Swift logging library: complete API reference"
+description: "Complete signatures for every public type, protocol, method, and enum in the Puppy Swift logging library, organized by type for quick lookup."
+---
+
+This page documents every public symbol in Puppy. Each section covers one type with its full declaration and a description of each member. For usage examples and explanations of concepts, see the [log levels reference](/reference/log-levels), [rotation config reference](/reference/rotation-config), and [error handling reference](/reference/error-handling) pages.
+
+<AccordionGroup>
+
+  <Accordion title="Puppy (struct)">
+    The central coordinator. You add loggers to a `Puppy` instance and call its logging methods; it dispatches to each logger on that logger's own queue.
+
+    ```swift
+    public struct Puppy: Sendable {
+        public private(set) var loggers: [any Loggerable]
+
+        public init(loggers: [any Loggerable] = [])
+
+        public mutating func add(_ logger: any Loggerable)
+        public mutating func remove(_ logger: any Loggerable)
+        public mutating func removeAll()
+
+        @inlinable
+        public func trace(
+            _ message: @autoclosure () -> String,
+            tag: String = "",
+            function: String = #function,
+            file: String = #fileID,
+            line: UInt = #line
+        )
+
+        @inlinable
+        public func verbose(
+            _ message: @autoclosure () -> String,
+            tag: String = "",
+            function: String = #function,
+            file: String = #fileID,
+            line: UInt = #line
+        )
+
+        @inlinable
+        public func debug(
+            _ message: @autoclosure () -> String,
+            tag: String = "",
+            function: String = #function,
+            file: String = #fileID,
+            line: UInt = #line
+        )
+
+        @inlinable
+        public func info(
+            _ message: @autoclosure () -> String,
+            tag: String = "",
+            function: String = #function,
+            file: String = #fileID,
+            line: UInt = #line
+        )
+
+        @inlinable
+        public func notice(
+            _ message: @autoclosure () -> String,
+            tag: String = "",
+            function: String = #function,
+            file: String = #fileID,
+            line: UInt = #line
+        )
+
+        @inlinable
+        public func warning(
+            _ message: @autoclosure () -> String,
+            tag: String = "",
+            function: String = #function,
+            file: String = #fileID,
+            line: UInt = #line
+        )
+
+        @inlinable
+        public func error(
+            _ message: @autoclosure () -> String,
+            tag: String = "",
+            function: String = #function,
+            file: String = #fileID,
+            line: UInt = #line
+        )
+
+        @inlinable
+        public func critical(
+            _ message: @autoclosure () -> String,
+            tag: String = "",
+            function: String = #function,
+            file: String = #fileID,
+            line: UInt = #line
+        )
+
+        @inlinable
+        public func logMessage(
+            _ level: LogLevel,
+            message: String,
+            tag: String,
+            function: String,
+            file: String,
+            line: UInt,
+            swiftLogInfo: [String: String] = ["source": ""]
+        )
+
+        public func flush(_ timeout: Double = 3.0) -> WaitingResult
+    }
+    ```
+
+    **Members**
+
+    - `loggers` — The current array of registered loggers. Read-only from outside; mutated via `add`, `remove`, and `removeAll`.
+    - `add(_:)` — Appends a logger. Duplicate labels are silently ignored; uniqueness is based on `label`.
+    - `remove(_:)` — Removes all loggers whose `label` matches the given logger's `label`.
+    - `removeAll()` — Removes every logger.
+    - `trace/verbose/debug/info/notice/warning/error/critical` — Convenience methods that call `logMessage` with the corresponding `LogLevel`. The `message` parameter is an `@autoclosure`, so the string is only evaluated when at least one logger will process it.
+    - `logMessage(_:message:tag:function:file:line:swiftLogInfo:)` — The underlying dispatch method. Captures the current date and thread ID once and fans out to all loggers. Use this directly when you have a dynamic `LogLevel` at call time.
+    - `flush(_:)` — Waits up to `timeout` seconds for every logger's queue to drain. Returns `.success` or `.timeout`.
+  </Accordion>
+
+  <Accordion title="WaitingResult (enum)">
+    The return type of `Puppy.flush(_:)`.
+
+    ```swift
+    public enum WaitingResult {
+        case success
+        case timeout
+    }
+    ```
+
+    - `.success` — All logger queues drained within the timeout.
+    - `.timeout` — The timeout elapsed before all queues finished.
+  </Accordion>
+
+  <Accordion title="Loggerable (protocol)">
+    The protocol that all Puppy loggers conform to. Implement `Loggerable` to create a custom transport.
+
+    ```swift
+    public protocol Loggerable: Sendable {
+        var label: String { get }
+        var queue: DispatchQueue { get }
+        var logLevel: LogLevel { get }
+        var logFormat: LogFormattable? { get }
+
+        func pickMessage(
+            _ level: LogLevel,
+            message: String,
+            tag: String,
+            function: String,
+            file: String,
+            line: UInt,
+            swiftLogInfo: [String: String],
+            label: String,
+            date: Date,
+            threadID: UInt64
+        )
+
+        func log(_ level: LogLevel, string: String)
+
+        func flush(completion: @escaping @Sendable () -> Void)
+    }
+    ```
+
+    **Members**
+
+    - `label` — A reverse-DNS string that uniquely identifies this logger. Also used as the `DispatchQueue` label.
+    - `queue` — The serial queue on which all formatting and writes happen.
+    - `logLevel` — The minimum level this logger will process. Messages below this level are dropped in the default `pickMessage` implementation.
+    - `logFormat` — An optional formatter. When `nil`, the raw message string is passed to `log`.
+    - `pickMessage` — Called by `Puppy.logMessage`. The default extension implementation compares `level.rawValue` against `logLevel.rawValue`, applies `logFormat` if present, and calls `log`.
+    - `log(_:string:)` — The transport-specific write method. Receives the final formatted string.
+    - `flush(completion:)` — Schedules `completion` on `queue`. The default implementation simply enqueues the callback.
+  </Accordion>
+
+  <Accordion title="LogFormattable (protocol)">
+    Implement this protocol to produce a custom log line format.
+
+    ```swift
+    public protocol LogFormattable: Sendable {
+        func formatMessage(
+            _ level: LogLevel,
+            message: String,
+            tag: String,
+            function: String,
+            file: String,
+            line: UInt,
+            swiftLogInfo: [String: String],
+            label: String,
+            date: Date,
+            threadID: UInt64
+        ) -> String
+    }
+    ```
+
+    The protocol extension also provides two helpers:
+
+    ```swift
+    extension LogFormattable {
+        public func moduleName(_ file: String) -> String
+        public func fileName(_ file: String) -> String
+    }
+    ```
+
+    - `formatMessage` — Called by `Loggerable.pickMessage` when `logFormat` is non-nil. Returns the string that will be written to the transport.
+    - `moduleName(_:)` — Extracts the module name from a `#fileID` string (the first path component).
+    - `fileName(_:)` — Extracts the file name from a `#fileID` string (the last path component).
+  </Accordion>
+
+  <Accordion title="LogLevel (enum)">
+    Eight log severity levels backed by `UInt8` raw values.
+
+    ```swift
+    public enum LogLevel: UInt8, Sendable {
+        case trace    = 1
+        case verbose  = 2
+        case debug    = 3
+        case info     = 4
+        case notice   = 5
+        case warning  = 6
+        case error    = 7
+        case critical = 8
+    }
+    ```
+
+    **Properties**
+
+    - `description: String` — Uppercase name: `"TRACE"`, `"VERBOSE"`, `"DEBUG"`, `"INFO"`, `"NOTICE"`, `"WARNING"`, `"ERROR"`, `"CRITICAL"`.
+    - `emoji: String` — Single emoji for each level: 🟤 🟣 🔵 🟢 🟠 🟡 🔴 💥
+    - `color: LogColor` — Terminal color constant for each level.
+
+    See the [log levels reference](/reference/log-levels) for a full table and filtering details.
+  </Accordion>
+
+  <Accordion title="FlushMode (enum)">
+    Controls whether `FileLogger` syncs the `FileHandle` after every write.
+
+    ```swift
+    public enum FlushMode: Sendable {
+        case always
+        case manual
+    }
+    ```
+
+    - `.always` — Calls `FileHandle.synchronize()` after each write. Safer; ensures data reaches disk immediately. Default.
+    - `.manual` — Skips per-write sync. Higher throughput; use `FileLoggerable.flush(_:)` to sync explicitly.
+  </Accordion>
+
+  <Accordion title="FileWritingErrorHandlingMode (enum)">
+    Determines how `FileLogger` surfaces write errors after initialization.
+
+    ```swift
+    public enum FileWritingErrorHandlingMode: Sendable {
+        case assert
+        case print
+        case force
+    }
+    ```
+
+    - `.assert` — `assertionFailure` in debug builds; silent in release builds.
+    - `.print` — Prints the error description to stdout in all builds.
+    - `.force` — Uses `try!`; crashes in all builds. Default for `FileLogger`.
+
+    See the [error handling reference](/reference/error-handling) for usage examples.
+  </Accordion>
+
+  <Accordion title="RotationConfig (struct)">
+    Configuration value passed to `FileRotationLogger` that controls when and how files are rotated.
+
+    ```swift
+    public struct RotationConfig: Sendable {
+        public enum SuffixExtension: Sendable {
+            case numbering
+            case date_uuid
+        }
+
+        public var suffixExtension: SuffixExtension
+        public typealias ByteCount = UInt64
+        public var maxFileSize: ByteCount
+        public var maxArchivedFilesCount: UInt8
+
+        public init(
+            suffixExtension: SuffixExtension = .numbering,
+            maxFileSize: ByteCount = 10 * 1024 * 1024,
+            maxArchivedFilesCount: UInt8 = 5
+        )
+    }
+    ```
+
+    **Members**
+
+    - `suffixExtension` — Archive naming strategy. `.numbering` produces `app.log.1`, `.app.log.2`, etc. `.date_uuid` produces `app.log.20231201T120000Z_<uuid>`.
+    - `maxFileSize` — Rotation threshold in bytes. Defaults to 10 MB (`10 * 1024 * 1024`).
+    - `maxArchivedFilesCount` — Maximum number of archive files to retain. Defaults to `5`.
+
+    See the [rotation config reference](/reference/rotation-config) for full details and examples.
+  </Accordion>
+
+  <Accordion title="FileRotationLoggerDelegate (protocol)">
+    Receive callbacks when `FileRotationLogger` archives or removes a file.
+
+    ```swift
+    public protocol FileRotationLoggerDelegate: AnyObject, Sendable {
+        func fileRotationLogger(
+            _ fileRotationLogger: FileRotationLogger,
+            didArchiveFileURL: URL,
+            toFileURL: URL
+        )
+        func fileRotationLogger(
+            _ fileRotationLogger: FileRotationLogger,
+            didRemoveArchivedFileURL: URL
+        )
+    }
+    ```
+
+    - `didArchiveFileURL:toFileURL:` — Called immediately after the active file is moved to its archive path. `didArchiveFileURL` is the original URL; `toFileURL` is the new archive URL.
+    - `didRemoveArchivedFileURL:` — Called for each archive deleted because `maxArchivedFilesCount` was exceeded.
+
+    <Note>
+      The delegate is held weakly. Ensure the delegate object outlives the logger.
+    </Note>
+  </Accordion>
+
+  <Accordion title="FileError (enum)">
+    Errors thrown by `FileLogger` and `FileRotationLogger` initializers, and returned by `FileLoggerable.delete(_:)`.
+
+    ```swift
+    public enum FileError: Error, Equatable, LocalizedError, Sendable {
+        case isNotFile(url: URL)
+        case invalidPermission(at: URL, filePermission: String)
+        case creatingDirectoryFailed(at: URL)
+        case creatingFileFailed(at: URL)
+        case openingForWritingFailed(at: URL)
+        case deletingFailed(at: URL)
+    }
+    ```
+
+    | Case | errorDescription |
+    |------|-----------------|
+    | `.isNotFile(url:)` | `"<url> is not a file"` |
+    | `.invalidPermission(at:filePermission:)` | `"invalid file permission. file: <url>, permission: <filePermission>"` |
+    | `.creatingDirectoryFailed(at:)` | `"failed to create a directory: <url>"` |
+    | `.creatingFileFailed(at:)` | `"failed to create a file: <url>"` |
+    | `.openingForWritingFailed(at:)` | `"failed to open a file for writing: <url>"` |
+    | `.deletingFailed(at:)` | `"failed to delete a file: <url>"` |
+
+    See the [error handling reference](/reference/error-handling) for a full description of each case and handling patterns.
+  </Accordion>
+
+  <Accordion title="LogColor (enum)">
+    An ANSI terminal color value returned by `LogLevel.color`. Use it with `String.colorize(_:)` inside a `LogFormattable` implementation to produce colored console output.
+
+    ```swift
+    public enum LogColor: Sendable {
+        case black
+        case red
+        case green
+        case yellow
+        case blue
+        case magenta
+        case cyan
+        case lightGray
+        case darkGray
+        case lightRed
+        case lightGreen
+        case lightYellow
+        case lightBlue
+        case lightMagenta
+        case lightCyan
+        case white
+        case colorNumber(_ number: UInt8)
+    }
+    ```
+
+    **Properties**
+
+    - `foregroundCode: String` — The ANSI escape sequence string for this color (e.g. `"\u{001B}[94m"` for lightBlue).
+    - `resetCode: String` — The ANSI reset sequence `"\u{001B}[0m"` that clears all formatting.
+
+    **`String` extension**
+
+    ```swift
+    extension String {
+        public func colorize(_ color: LogColor) -> String
+    }
+    ```
+
+    Wraps the string with the color's `foregroundCode` prefix and `resetCode` suffix. Use inside `formatMessage` to produce colorized terminal output:
+
+    ```swift
+    return formattedString.colorize(level.color)
+    ```
+  </Accordion>
+
+  <Accordion title="FileLoggerable (protocol)">
+    A protocol that extends `Loggerable` for file-based loggers. Both `FileLogger` and `FileRotationLogger` conform to it. It provides shared file management operations.
+
+    ```swift
+    public protocol FileLoggerable: Loggerable, Sendable {
+        var fileURL: URL { get }
+        var filePermission: String { get }
+    }
+    ```
+
+    **Members**
+
+    - `fileURL` — The absolute URL of the log file.
+    - `filePermission` — The POSIX permission string (octal) applied when the file is created.
+
+    **Extension methods provided by default**
+
+    - `delete(_ url: URL) -> Result<URL, FileError>` — Synchronously deletes the file at `url` on the logger's queue. Returns `.success(url)` or `.failure(.deletingFailed(at:))`.
+    - `delete(_ url: URL) async throws -> URL` — Async variant of `delete`. Available on macOS 10.15+, iOS 13+, tvOS 13+, watchOS 6+.
+    - `flush(_ url: URL)` — Synchronously synchronizes and closes a `FileHandle` for `url`. Use this when `flushMode` is `.manual`.
+    - `flush(_ url: URL) async` — Async variant. Available on macOS 10.15+, iOS 13+, tvOS 13+, watchOS 6+.
+  </Accordion>
+
+</AccordionGroup>

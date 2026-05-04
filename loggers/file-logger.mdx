@@ -1,0 +1,129 @@
+---
+title: "FileLogger: write Swift log output to a file on disk"
+description: "FileLogger appends log messages to a file on disk, with configurable permissions, flush behavior, and write-error handling for reliable persistent logging."
+---
+
+`FileLogger` persists log messages to a file on disk. On initialization it creates the file and any intermediate directories if they do not already exist, then opens the file for appending. Each call to `log` appends the formatted message followed by `\r\n`. Because `FileLogger` conforms to `FileLoggerable` (which extends `Loggerable`), it shares the same queue-based, non-blocking dispatch model as every other Puppy logger.
+
+## Initializer
+
+```swift
+FileLogger(
+    _ label: String,
+    logLevel: LogLevel = .trace,
+    logFormat: LogFormattable? = nil,
+    fileURL: URL,
+    filePermission: String = "640",
+    flushMode: FlushMode = .always,
+    writeMode: FileWritingErrorHandlingMode = .force
+) throws
+```
+
+<ParamField path="label" type="String" required>
+  A unique identifier for this logger, also used as the internal `DispatchQueue` label. Use reverse-domain-name style (e.g. `"com.example.yourapp.file"`) to avoid collisions.
+</ParamField>
+
+<ParamField path="logLevel" type="LogLevel" default=".trace">
+  The minimum level required for a message to be written to disk. Messages below this threshold are silently dropped.
+</ParamField>
+
+<ParamField path="logFormat" type="LogFormattable?" default="nil">
+  An optional formatter that transforms the raw message string before it is written. When `nil`, the message is written verbatim.
+</ParamField>
+
+<ParamField path="fileURL" type="URL" required>
+  The absolute `URL` of the log file. The URL must point to a file path (not a directory). Intermediate directories are created automatically. Use `URL(fileURLWithPath:).absoluteURL` to produce a suitable value.
+</ParamField>
+
+<ParamField path="filePermission" type="String" default='"640"'>
+  The POSIX file permission for the log file expressed as an octal string (e.g. `"640"`, `"600"`, `"644"`). Valid values are `"000"` through `"777"`. An invalid string causes init to throw `FileError.invalidPermission`.
+</ParamField>
+
+<ParamField path="flushMode" type="FlushMode" default=".always">
+  Controls when the file handle is synchronized to disk after each write.
+
+  - `.always` — calls `synchronize()` after every message. Safest; guarantees messages survive a crash.
+  - `.manual` — skips automatic flushing. Call `flush(_:)` yourself when you need a guaranteed flush. Useful when high write throughput matters more than crash-safety.
+</ParamField>
+
+<ParamField path="writeMode" type="FileWritingErrorHandlingMode" default=".force">
+  Determines how write failures (e.g. disk full) are handled.
+
+  - `.force` — uses `try!` to write, crashing on failure in all build configurations. The default; appropriate when log loss is unacceptable.
+  - `.assert` — triggers `assertionFailure` in debug builds and silently ignores failures in release builds.
+  - `.print` — prints the error description to standard output and continues.
+</ParamField>
+
+## Error handling
+
+`FileLogger.init` is a throwing initializer. It throws a `FileError` value in any of these cases:
+
+| Case | Cause |
+|---|---|
+| `FileError.isNotFile(url:)` | `fileURL` has a directory path |
+| `FileError.invalidPermission(at:filePermission:)` | `filePermission` is not a valid octal string in `000`–`777` |
+| `FileError.creatingDirectoryFailed(at:)` | Parent directory could not be created |
+| `FileError.creatingFileFailed(at:)` | The log file could not be created |
+| `FileError.openingForWritingFailed(at:)` | The file exists but could not be opened for writing |
+
+<Note>
+  Always handle the thrown error at the call site. Using `try!` is convenient during prototyping but will crash if the path is invalid or disk permissions are insufficient.
+</Note>
+
+## Usage
+
+<Steps>
+  <Step title="Build the file URL">
+    Resolve an absolute file URL for the log file.
+
+    ```swift
+    import Puppy
+
+    let fileURL = URL(fileURLWithPath: "./logs/app.log").absoluteURL
+    ```
+  </Step>
+  <Step title="Create the logger">
+    Initialize `FileLogger`, handling the thrown error.
+
+    ```swift
+    let file = try FileLogger(
+        "com.example.yourapp.file",
+        logLevel: .info,
+        fileURL: fileURL,
+        filePermission: "600"
+    )
+    ```
+  </Step>
+  <Step title="Add it to Puppy and log">
+    ```swift
+    let puppy = Puppy(loggers: [file])
+
+    puppy.info("Server started")
+    puppy.error("Connection refused")
+    ```
+  </Step>
+</Steps>
+
+### Using `.manual` flush mode
+
+When writing many messages rapidly, switching to `.manual` flush mode can reduce I/O overhead. Flush explicitly at safe points.
+
+```swift
+let file = try FileLogger(
+    "com.example.yourapp.file",
+    logLevel: .debug,
+    fileURL: fileURL,
+    flushMode: .manual
+)
+
+let puppy = Puppy(loggers: [file])
+
+// ... high-frequency logging ...
+
+// Flush when convenient
+file.flush(fileURL)
+```
+
+<Tip>
+  The file permission `"640"` (default) allows the owning user to read and write, the owning group to read, and no access for others. Use `"600"` if the log file may contain sensitive data and you do not want group-readable output.
+</Tip>

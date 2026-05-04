@@ -1,0 +1,140 @@
+---
+title: "FileError types and write failure handling in Puppy"
+description: "FileLogger and FileRotationLogger throw FileError on init and surface write failures through FileWritingErrorHandlingMode—assert, print, or force."
+---
+
+`FileLogger` and `FileRotationLogger` both perform I/O in their initializers—creating the log directory, creating the file if it does not exist, and opening a write handle. Any of these operations can fail, so both initializers are marked `throws` and surface errors as `FileError` values. After initialization, write failures during normal logging are not rethrown; instead, the `FileWritingErrorHandlingMode` you choose at init time controls whether failures crash the process, trigger an assertion, or print to stdout.
+
+## FileError enum
+
+```swift
+public enum FileError: Error, Equatable, LocalizedError, Sendable {
+    case isNotFile(url: URL)
+    case invalidPermission(at: URL, filePermission: String)
+    case creatingDirectoryFailed(at: URL)
+    case creatingFileFailed(at: URL)
+    case openingForWritingFailed(at: URL)
+    case deletingFailed(at: URL)
+}
+```
+
+<AccordionGroup>
+  <Accordion title=".isNotFile(url:)">
+    Thrown when the provided URL has a directory path rather than a file path.
+
+    **Error description:** `"<url> is not a file"`
+
+    This happens if you accidentally pass a directory URL as the `fileURL` parameter, for example by omitting the filename from the path.
+  </Accordion>
+
+  <Accordion title=".invalidPermission(at:filePermission:)">
+    Thrown when the `filePermission` string cannot be parsed as a valid octal value between `"000"` and `"777"`.
+
+    **Error description:** `"invalid file permission. file: <url>, permission: <filePermission>"`
+
+    The default permission is `"640"`. Pass a different octal string if you need tighter or looser access, for example `"600"` for owner-read-only.
+  </Accordion>
+
+  <Accordion title=".creatingDirectoryFailed(at:)">
+    Thrown when the intermediate directories for the log file cannot be created.
+
+    **Error description:** `"failed to create a directory: <url>"`
+
+    The logger tries to create all missing intermediate directories using `FileManager.createDirectory(withIntermediateDirectories:true)`. This error fires when that call fails, for example due to a permissions problem on a parent directory.
+  </Accordion>
+
+  <Accordion title=".creatingFileFailed(at:)">
+    Thrown when the log file does not yet exist and `FileManager.createFile` returns `false`.
+
+    **Error description:** `"failed to create a file: <url>"`
+
+    This can happen when the process lacks write permission on the target directory even though the directory itself exists.
+  </Accordion>
+
+  <Accordion title=".openingForWritingFailed(at:)">
+    Thrown when the log file exists but a write-mode `FileHandle` cannot be opened on it.
+
+    **Error description:** `"failed to open a file for writing: <url>"`
+
+    This often indicates a file permission mismatch—for example, the file exists with permissions that deny write access to the current process.
+  </Accordion>
+
+  <Accordion title=".deletingFailed(at:)">
+    Returned (not thrown) by `FileLoggerable.delete(_:)` when `FileManager.removeItem` fails.
+
+    **Error description:** `"failed to delete a file: <url>"`
+
+    The synchronous `delete(_:)` method returns a `Result<URL, FileError>` rather than throwing, so callers can handle deletion failures without a `try/catch`.
+  </Accordion>
+</AccordionGroup>
+
+## FileWritingErrorHandlingMode enum
+
+After a `FileLogger` or `FileRotationLogger` is successfully initialized, write failures are non-throwing. The `writeMode` parameter on `FileLogger.init` selects how those failures surface:
+
+```swift
+public enum FileWritingErrorHandlingMode: Sendable {
+    case assert
+    case print
+    case force
+}
+```
+
+| Mode | Debug builds | Release builds |
+|------|-------------|----------------|
+| `.force` | Crashes (`try!`) | Crashes (`try!`) |
+| `.assert` | `assertionFailure` (stops execution) | Silent (message dropped) |
+| `.print` | Prints error to stdout | Prints error to stdout |
+
+<Warning>
+  `.force` is the default for `FileLogger`. If the disk is full or the file handle becomes invalid, your process will crash. Use `.assert` or `.print` when you need the application to survive logging failures.
+</Warning>
+
+## Handling initialization errors
+
+Wrap `FileLogger` and `FileRotationLogger` initializers in a `do/catch` block to inspect `FileError` values:
+
+```swift
+import Puppy
+
+let logURL = URL(fileURLWithPath: "/var/log/myapp/app.log")
+
+do {
+    let fileLogger = try FileLogger(
+        "com.example.app.file",
+        logLevel: .info,
+        fileURL: logURL
+    )
+    var puppy = Puppy(loggers: [fileLogger])
+    puppy.info("Logger initialized successfully")
+} catch FileError.isNotFile(let url) {
+    print("Expected a file URL, got: \(url)")
+} catch FileError.invalidPermission(let url, let permission) {
+    print("Bad permission '\(permission)' for \(url)")
+} catch FileError.creatingDirectoryFailed(let url) {
+    print("Could not create log directory at \(url)")
+} catch FileError.creatingFileFailed(let url) {
+    print("Could not create log file at \(url)")
+} catch FileError.openingForWritingFailed(let url) {
+    print("Could not open \(url) for writing")
+} catch {
+    print("Unexpected error: \(error)")
+}
+```
+
+## Choosing a resilient write mode
+
+If your application must not crash on logging failures—for example in a long-running server where disk issues are possible—initialize `FileLogger` with `.print` or `.assert`:
+
+```swift
+let fileLogger = try FileLogger(
+    "com.example.app.file",
+    logLevel: .info,
+    fileURL: logURL,
+    writeMode: .print  // prints errors to stdout instead of crashing
+)
+```
+
+<Tip>
+  Use `.assert` during development to catch write failures early in debug builds, while letting release builds continue silently. Switch to `.print` in production if you want observability without crashes.
+</Tip>

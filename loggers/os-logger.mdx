@@ -1,0 +1,110 @@
+---
+title: "OSLogger: send Puppy logs to Apple's unified logging"
+description: "OSLogger forwards Puppy log messages to Apple's os_log, making them visible in Console.app and filterable by subsystem and category."
+---
+
+`OSLogger` bridges Puppy's log levels to Apple's unified logging system via `os_log`. Messages appear in Console.app and can be filtered by subsystem or category, making it straightforward to correlate your application logs with system events. The `label` parameter becomes the `OSLog` subsystem, and the optional `category` parameter (default `"Puppy"`) maps to the OSLog category.
+
+<Warning>
+  `OSLogger` is only available on Darwin platforms (macOS, iOS, tvOS, watchOS, visionOS). It is compiled conditionally with `#if canImport(Darwin)` and is not available on Linux or Windows.
+</Warning>
+
+## Initializer
+
+```swift
+OSLogger(
+    _ label: String,
+    logLevel: LogLevel = .trace,
+    logFormat: LogFormattable? = nil,
+    category: String = "Puppy"
+)
+```
+
+<ParamField path="label" type="String" required>
+  A unique identifier for this logger and the `OSLog` subsystem. Use a reverse-domain-name string (e.g. `"com.example.yourapp.oslog"`) so your messages are easy to filter in Console.app by subsystem.
+</ParamField>
+
+<ParamField path="logLevel" type="LogLevel" default=".trace">
+  The minimum Puppy log level required for a message to be forwarded to `os_log`. Messages below this level are dropped before reaching the system.
+</ParamField>
+
+<ParamField path="logFormat" type="LogFormattable?" default="nil">
+  An optional formatter applied before the message is passed to `os_log`. When `nil`, the raw message string is logged verbatim.
+</ParamField>
+
+<ParamField path="category" type="String" default='"Puppy"'>
+  The OSLog category string. Use descriptive values such as `"Networking"` or `"Database"` to sub-divide messages within the subsystem in Console.app.
+</ParamField>
+
+## Log level mapping
+
+Because `OSLogType` has fewer levels than Puppy's `LogLevel`, some levels are mapped to the nearest OSLog equivalent:
+
+| Puppy level | OSLogType |
+|---|---|
+| `.trace` | `.debug` |
+| `.verbose` | `.debug` |
+| `.debug` | `.debug` |
+| `.info` | `.info` |
+| `.notice` | `.info` |
+| `.warning` | `.default` |
+| `.error` | `.error` |
+| `.critical` | `.fault` |
+
+<Note>
+  OSLog's `.debug` messages are not persisted to disk by default and do not appear in Console.app unless the "Include Debug Messages" option is enabled. If you need guaranteed persistence, log at `.info` or above.
+</Note>
+
+## Usage
+
+<Steps>
+  <Step title="Create the logger">
+    ```swift
+    import Puppy
+
+    let oslog = OSLogger(
+        "com.example.yourapp.oslog",
+        logLevel: .debug,
+        category: "Networking"
+    )
+    ```
+  </Step>
+  <Step title="Add it to Puppy and log">
+    ```swift
+    let puppy = Puppy(loggers: [oslog])
+
+    puppy.info("Request started")
+    puppy.error("Connection timed out")
+    ```
+  </Step>
+  <Step title="Use a custom format (optional)">
+    Supply a `LogFormattable` to control what string is sent to the system logger.
+
+    ```swift
+    struct LogFormatter: LogFormattable {
+        private let dateFormat = DateFormatter()
+
+        init() {
+            dateFormat.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ"
+        }
+
+        func formatMessage(_ level: LogLevel, message: String, tag: String, function: String,
+                           file: String, line: UInt, swiftLogInfo: [String: String],
+                           label: String, date: Date, threadID: UInt64) -> String {
+            let formattedDate = dateFormatter(date, withFormatter: dateFormat)
+            return "\(formattedDate) [\(level)] \(message)"
+        }
+    }
+
+    let oslog = OSLogger(
+        "com.example.yourapp.oslog",
+        logLevel: .info,
+        logFormat: LogFormatter()
+    )
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  You can combine `OSLogger` with `FileLogger` or `ConsoleLogger` in the same `Puppy` instance. Each logger applies its own level filter independently, so you can, for example, send `.info` and above to the system logger while capturing everything from `.debug` to a file.
+</Tip>

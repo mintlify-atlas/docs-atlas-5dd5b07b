@@ -1,0 +1,160 @@
+---
+title: "RotationConfig: configure Puppy's file log rotation"
+description: "RotationConfig controls when FileRotationLogger archives a log file and how archived files are named—by sequential number or by date and UUID."
+---
+
+File rotation prevents a single log file from growing without bound. `FileRotationLogger` checks the active file's byte count before and after every write. When the file exceeds `maxFileSize`, it archives the current file, opens a fresh one, and removes the oldest archives if the count exceeds `maxArchivedFilesCount`. You control all three behaviors through a `RotationConfig` value that you pass to the logger at initialization.
+
+## RotationConfig struct
+
+```swift
+public struct RotationConfig: Sendable {
+    public enum SuffixExtension: Sendable {
+        case numbering
+        case date_uuid
+    }
+
+    public var suffixExtension: SuffixExtension
+    public typealias ByteCount = UInt64
+    public var maxFileSize: ByteCount
+    public var maxArchivedFilesCount: UInt8
+
+    public init(
+        suffixExtension: SuffixExtension = .numbering,
+        maxFileSize: ByteCount = 10 * 1024 * 1024,
+        maxArchivedFilesCount: UInt8 = 5
+    )
+}
+```
+
+### Properties
+
+<AccordionGroup>
+  <Accordion title="suffixExtension: SuffixExtension">
+    Controls how the archived file is renamed. Defaults to `.numbering`.
+
+    **`.numbering`** — The active file is archived as `app.log.1`. Any existing archive is first bumped up: `app.log.1` becomes `app.log.2`, `app.log.2` becomes `app.log.3`, and so on. This keeps archives ordered from newest (`.1`) to oldest.
+
+    **`.date_uuid`** — The active file is archived with a timestamp and UUID suffix, for example:
+    ```
+    app.log.20231201T120000Z_3b4e2a1f-dead-beef-cafe-000000000000
+    ```
+    The timestamp uses the format `yyyyMMdd'T'HHmmssZZZZZ` in UTC. Archives accumulate without reordering; the oldest ones are removed when `maxArchivedFilesCount` is exceeded.
+  </Accordion>
+
+  <Accordion title="maxFileSize: ByteCount (UInt64)">
+    The maximum size in bytes the active log file may reach before rotation triggers. Defaults to `10 * 1024 * 1024` (10 MB).
+
+    The check happens both before and after each write, so rotation is triggered on the first write that pushes the file past the threshold.
+  </Accordion>
+
+  <Accordion title="maxArchivedFilesCount: UInt8">
+    The maximum number of archived files to keep. Defaults to `5`. When the number of archives exceeds this value after a rotation, the oldest archives are deleted. The delegate is notified for each deleted file.
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+### 30 MB rotation with sequential numbering
+
+```swift
+import Puppy
+
+let logURL = URL(fileURLWithPath: "/var/log/myapp/app.log")
+let config = RotationConfig(
+    suffixExtension: .numbering,
+    maxFileSize: 30 * 1024 * 1024, // 30 MB
+    maxArchivedFilesCount: 5
+)
+
+let rotatingLogger = try FileRotationLogger(
+    "com.example.app.rotating",
+    logLevel: .info,
+    fileURL: logURL,
+    rotationConfig: config
+)
+```
+
+After three rotations the log directory contains:
+```
+app.log       ← active file (current writes go here)
+app.log.1     ← most recent archive
+app.log.2
+app.log.3
+```
+
+### 10 MB rotation with date-UUID archives
+
+```swift
+let config = RotationConfig(
+    suffixExtension: .date_uuid,
+    maxFileSize: 10 * 1024 * 1024, // 10 MB (default)
+    maxArchivedFilesCount: 10
+)
+
+let rotatingLogger = try FileRotationLogger(
+    "com.example.app.rotating",
+    logLevel: .debug,
+    fileURL: logURL,
+    rotationConfig: config
+)
+```
+
+Archived files look like:
+```
+app.log
+app.log.20231201T120000Z_3b4e2a1f-dead-beef-cafe-000000000000
+app.log.20231201T180032Z_7f9c1d2e-fade-babe-1234-abcdef012345
+```
+
+## Delegation
+
+`FileRotationLogger` accepts an optional `FileRotationLoggerDelegate` that receives callbacks when files are archived or removed. This is useful for shipping archived files to a remote destination or for monitoring disk usage.
+
+```swift
+public protocol FileRotationLoggerDelegate: AnyObject, Sendable {
+    func fileRotationLogger(
+        _ fileRotationLogger: FileRotationLogger,
+        didArchiveFileURL: URL,
+        toFileURL: URL
+    )
+    func fileRotationLogger(
+        _ fileRotationLogger: FileRotationLogger,
+        didRemoveArchivedFileURL: URL
+    )
+}
+```
+
+### Example delegate
+
+```swift
+final class LogArchiver: FileRotationLoggerDelegate, @unchecked Sendable {
+    func fileRotationLogger(
+        _ fileRotationLogger: FileRotationLogger,
+        didArchiveFileURL: URL,
+        toFileURL: URL
+    ) {
+        print("Archived \(didArchiveFileURL.lastPathComponent) → \(toFileURL.lastPathComponent)")
+        // Upload toFileURL to remote storage here
+    }
+
+    func fileRotationLogger(
+        _ fileRotationLogger: FileRotationLogger,
+        didRemoveArchivedFileURL: URL
+    ) {
+        print("Removed old archive: \(didRemoveArchivedFileURL.lastPathComponent)")
+    }
+}
+
+let archiver = LogArchiver()
+let rotatingLogger = try FileRotationLogger(
+    "com.example.app.rotating",
+    fileURL: logURL,
+    rotationConfig: config,
+    delegate: archiver
+)
+```
+
+<Note>
+  The delegate is held weakly by `FileRotationLogger`. Make sure the delegate object has a lifetime at least as long as the logger.
+</Note>

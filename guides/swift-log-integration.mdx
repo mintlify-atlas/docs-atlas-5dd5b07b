@@ -1,0 +1,134 @@
+---
+title: "Use Puppy as a swift-log backend with PuppyLogHandler"
+description: "Wire Puppy into the apple/swift-log ecosystem via PuppyLogHandler so swift-log Loggers route output through Puppy's console, file, and syslog transports."
+---
+
+`apple/swift-log` defines a common logging API for Swift packages, but leaves transport—where log messages actually go—up to the application. Puppy fills that role through `PuppyLogHandler`, a `LogHandler` implementation that forwards every swift-log event to a `Puppy` instance. This lets libraries that emit swift-log calls benefit from Puppy's transports, rotation, and formatting without any changes to the library code.
+
+## PuppyLogHandler
+
+`PuppyLogHandler` conforms to `LogHandler` from the `Logging` module (apple/swift-log). It is available whenever the `Logging` module can be imported; the dependency is included automatically via Puppy's `Package.swift`.
+
+```swift
+public struct PuppyLogHandler: LogHandler, Sendable {
+    public var logLevel: Logger.Level
+    public var metadata: Logger.Metadata
+
+    public init(label: String, puppy: Puppy, metadata: Logger.Metadata = [:])
+}
+```
+
+<Note>
+`PuppyLogHandler.swift` uses `@_exported import Logging`, which re-exports the `Logging` module. After importing `Puppy` in a file that uses `PuppyLogHandler`, you do not need a separate `import Logging` statement.
+</Note>
+
+## Log level mapping
+
+`PuppyLogHandler` maps every `Logger.Level` value to the corresponding `LogLevel`:
+
+| `Logger.Level` (swift-log) | `LogLevel` (Puppy) |
+|----------------------------|--------------------|
+| `.trace` | `.trace` |
+| `.debug` | `.debug` |
+| `.info` | `.info` |
+| `.notice` | `.notice` |
+| `.warning` | `.warning` |
+| `.error` | `.error` |
+| `.critical` | `.critical` |
+
+<Note>
+Puppy's `LogLevel` includes `.verbose` (between `.trace` and `.debug`) which has no equivalent in swift-log. Events logged at `.verbose` via the Puppy API directly are not affected.
+</Note>
+
+## Bootstrapping with LoggingSystem
+
+Register `PuppyLogHandler` as the global backend before creating any `Logger` instances:
+
+```swift
+LoggingSystem.bootstrap {
+    var handler = PuppyLogHandler(label: $0, puppy: puppy)
+    handler.logLevel = .trace
+    return handler
+}
+```
+
+The closure receives the label of each `Logger` being created and returns a configured `LogHandler`. Setting `handler.logLevel` here controls the minimum level the handler forwards to Puppy.
+
+## Metadata
+
+`PuppyLogHandler` supports the full swift-log metadata API:
+
+```swift
+// Set metadata on the handler at initialization
+var handler = PuppyLogHandler(label: label, puppy: puppy, metadata: ["env": "production"])
+
+// Read or write individual keys via subscript
+handler[metadataKey: "requestID"] = "abc-123"
+let requestID = handler[metadataKey: "requestID"]
+```
+
+When a log event is processed, per-call metadata is merged with the handler's stored metadata (per-call values win on conflicts). The merged result is serialized and passed to Puppy as `swiftLogInfo["metadata"]`, where a custom `LogFormattable` can include it in the formatted output.
+
+## Complete example
+
+The following example routes all swift-log output through a console logger and a syslog logger:
+
+```swift
+import Puppy
+
+let console = ConsoleLogger("com.example.yourapp.console")
+let syslog = SystemLogger("com.example.yourapp.syslog")
+
+let puppy = Puppy(loggers: [console, syslog])
+
+LoggingSystem.bootstrap {
+    var handler = PuppyLogHandler(label: $0, puppy: puppy)
+    handler.logLevel = .trace
+    return handler
+}
+
+var log = Logger(label: "com.example.yourapp.swiftlog")
+
+log.trace("TRACE message")  // logged
+log.debug("DEBUG message")  // logged
+```
+
+## Implementation workflow
+
+<Steps>
+  <Step title="Configure Puppy loggers">
+    Create one or more Puppy loggers and add them to a `Puppy` instance. These are the actual transports that will receive log output:
+
+    ```swift
+    import Puppy
+
+    let console = ConsoleLogger("com.example.yourapp.console")
+    let syslog = SystemLogger("com.example.yourapp.syslog")
+    let puppy = Puppy(loggers: [console, syslog])
+    ```
+  </Step>
+  <Step title="Bootstrap the logging system">
+    Call `LoggingSystem.bootstrap` once, before any `Logger` is created. Configure the log level inside the closure:
+
+    ```swift
+    LoggingSystem.bootstrap {
+        var handler = PuppyLogHandler(label: $0, puppy: puppy)
+        handler.logLevel = .trace
+        return handler
+    }
+    ```
+  </Step>
+  <Step title="Create and use a Logger">
+    Create `Logger` instances as normal. All calls are automatically routed through `PuppyLogHandler` to the Puppy transports:
+
+    ```swift
+    var log = Logger(label: "com.example.yourapp.swiftlog")
+    log.info("Server started on port 8080")
+    log.error("Failed to connect to database")
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+`LoggingSystem.bootstrap` can only be called once per process. Call it as early as possible in your app's startup sequence—before any library code has a chance to create a `Logger`.
+</Tip>

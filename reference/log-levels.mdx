@@ -1,0 +1,88 @@
+---
+title: "Puppy log levels: trace, debug, info, and critical"
+description: "Puppy defines eight log levels backed by UInt8 rawValues. Each logger filters messages below its configured level before writing to its transport."
+---
+
+Puppy's `LogLevel` enum defines eight severity levels, each backed by a `UInt8` raw value from 1 (`trace`) to 8 (`critical`). When a message arrives at a logger, the logger compares the message's level raw value to its own configured `logLevel`. If the message raw value is lower, the message is discarded without formatting or writing. This makes filtering cheap—no string formatting happens for suppressed messages—and lets you set different thresholds on different loggers at the same time.
+
+## The LogLevel enum
+
+```swift
+public enum LogLevel: UInt8, Sendable {
+    case trace    = 1
+    case verbose  = 2
+    case debug    = 3
+    case info     = 4
+    case notice   = 5
+    case warning  = 6
+    case error    = 7
+    case critical = 8
+}
+```
+
+## Level reference
+
+| Level | Raw value | Emoji | Color | When to use |
+|-------|-----------|-------|-------|-------------|
+| `trace` | 1 | 🟤 | darkGray | Extremely granular execution traces; disabled in all but the noisiest debug sessions |
+| `verbose` | 2 | 🟣 | lightMagenta | Detailed diagnostic output, more informative than debug but still high-volume |
+| `debug` | 3 | 🔵 | lightBlue | Values, state snapshots, and control-flow checkpoints useful during development |
+| `info` | 4 | 🟢 | lightGreen | Normal lifecycle events your operations team wants to see in production |
+| `notice` | 5 | 🟠 | yellow | Significant but expected conditions that may warrant attention |
+| `warning` | 6 | 🟡 | lightYellow | Something unexpected happened but the application can continue normally |
+| `error` | 7 | 🔴 | lightRed | A recoverable failure; an operation could not complete successfully |
+| `critical` | 8 | 💥 | red | A severe failure that requires immediate intervention or will crash the process |
+
+## How filtering works
+
+Inside `Loggerable.pickMessage`, every incoming message is checked before any formatting occurs:
+
+```swift
+if level.rawValue < logLevel.rawValue {
+    return  // message is silently dropped
+}
+```
+
+Because filtering uses integer comparison, suppressed messages incur no formatting cost. The `@autoclosure` on each `Puppy` logging method means the message string itself is not even evaluated when all loggers would suppress it.
+
+## Setting different levels on different loggers
+
+Each logger carries its own `logLevel`, so you can capture verbose output to a file while keeping the console quiet:
+
+```swift
+import Puppy
+
+let console = ConsoleLogger(
+    "com.example.app.console",
+    logLevel: .warning   // only warning and above
+)
+
+let fileURL = URL(fileURLWithPath: "/var/log/myapp/debug.log")
+let fileLogger = try FileLogger(
+    "com.example.app.file",
+    logLevel: .debug,    // debug and above
+    fileURL: fileURL
+)
+
+var puppy = Puppy(loggers: [console, fileLogger])
+
+puppy.debug("connected to database")   // written to file only
+puppy.warning("retry attempt 3 of 5") // written to both
+puppy.error("connection refused")      // written to both
+```
+
+## The description and emoji properties
+
+`LogLevel` conforms to `CustomStringConvertible` and exposes an `emoji` property, both of which are commonly used inside custom `LogFormattable` implementations:
+
+```swift
+let level = LogLevel.warning
+
+print(level.description) // "WARNING"
+print(level.emoji)       // "🟡"
+print(level.color)       // LogColor.lightYellow
+```
+
+<Tip>
+  Use `level.emoji` in your `LogFormattable.formatMessage` implementation to make severity immediately visible when tailing log files in a terminal.
+</Tip>

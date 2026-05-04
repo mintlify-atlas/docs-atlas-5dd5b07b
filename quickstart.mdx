@@ -1,81 +1,166 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Quickstart guide: logging with Puppy in Swift apps"
+description: "Set up console and file logging in Swift with Puppy, explore all eight log levels, and learn to add or remove loggers at runtime and flush pending writes."
 ---
 
-## Get started in three steps
+This guide walks you through a complete working setup: logging to the console and a file simultaneously using Puppy's two most common transports. By the end you'll have a `Puppy` instance ready to use, you'll know all eight log levels and when to reach for each, and you'll understand how to adjust the logger pipeline at runtime.
 
-Get your documentation site running locally and make your first customization.
+<Note>
+  This guide assumes you've already added Puppy to your project. If not, see the [installation guide](/installation) first.
+</Note>
 
-### Step 1: Set up your local environment
+## Set up console and file logging
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+<Steps>
+  <Step title="Import Puppy">
+    Add the import at the top of your Swift file:
 
-### Step 2: Deploy your changes
+    ```swift
+    import Puppy
+    ```
+  </Step>
+  <Step title="Create a console logger">
+    `ConsoleLogger` writes to standard output. The first argument is a unique reverse-domain label—Puppy also uses it as the `DispatchQueue` label internally, so it must be unique per logger instance.
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```swift
+    let console = ConsoleLogger("com.example.yourapp.console", logLevel: .info)
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    Any message below `.info` (i.e. `.trace`, `.verbose`, `.debug`) will be silently dropped by this logger.
+  </Step>
+  <Step title="Create a file logger">
+    `FileLogger` appends messages to a file. Provide an absolute URL and an optional Unix permission mode string (defaults to `"640"`).
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```swift
+    let fileURL = URL(fileURLWithPath: "./foo.log").absoluteURL
+    let file = FileLogger("com.example.yourapp.file",
+                          logLevel: .info,
+                          fileURL: fileURL,
+                          filePermission: "600")
+    ```
+  </Step>
+  <Step title="Combine loggers into a Puppy instance">
+    Pass both loggers to `Puppy`. Every call on the `puppy` instance is forwarded to all registered loggers concurrently.
 
-### Step 3: Go live
+    ```swift
+    var puppy = Puppy(loggers: [console, file])
+    ```
+  </Step>
+  <Step title="Log messages">
+    Call any of the eight log-level methods. Each logger applies its own minimum level filter independently:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    ```swift
+    puppy.trace("TRACE message")    // dropped — below .info on both loggers
+    puppy.verbose("VERBOSE message") // dropped
+    puppy.debug("DEBUG message")    // dropped
+    puppy.info("INFO message")      // logged to console and file
+    puppy.notice("NOTICE message")  // logged to console and file
+    puppy.warning("WARNING message") // logged to console and file
+    puppy.error("ERROR message")    // logged to console and file
+    puppy.critical("CRITICAL message") // logged to console and file
+    ```
+  </Step>
+</Steps>
+
+## Complete example
+
+Here is the full setup from the steps above in a single block:
+
+```swift
+import Puppy
+
+let console = ConsoleLogger("com.example.yourapp.console", logLevel: .info)
+let fileURL = URL(fileURLWithPath: "./foo.log").absoluteURL
+let file = FileLogger("com.example.yourapp.file",
+                      logLevel: .info,
+                      fileURL: fileURL,
+                      filePermission: "600")  // Default permission is "640".
+
+var puppy = Puppy(loggers: [console, file])
+
+puppy.debug("DEBUG message")  // Will NOT be logged.
+puppy.info("INFO message")    // Will be logged.
+puppy.error("ERROR message")  // Will be logged.
+```
+
+## Log levels
+
+Puppy defines eight levels as a `UInt8` enum in ascending severity order. A logger configured at a given level drops all messages with a lower raw value.
+
+| Method | Level | Raw value |
+|--------|-------|-----------|
+| `puppy.trace(...)` | `.trace` | 1 |
+| `puppy.verbose(...)` | `.verbose` | 2 |
+| `puppy.debug(...)` | `.debug` | 3 |
+| `puppy.info(...)` | `.info` | 4 |
+| `puppy.notice(...)` | `.notice` | 5 |
+| `puppy.warning(...)` | `.warning` | 6 |
+| `puppy.error(...)` | `.error` | 7 |
+| `puppy.critical(...)` | `.critical` | 8 |
+
+## Adding and removing loggers at runtime
+
+Because `Puppy` is a `struct`, you need a `var` binding to mutate it. Use `add(_:)` and `remove(_:)` to update the logger pipeline at runtime. Loggers are identified by their label—adding a logger whose label already exists is a no-op.
+
+```swift
+var puppy = Puppy()
+
+let console = ConsoleLogger("com.example.yourapp.console", logLevel: .debug)
+puppy.add(console)
+
+puppy.debug("Now logging to console")
+
+// Remove the console logger later
+puppy.remove(console)
+
+// Remove all loggers at once
+puppy.removeAll()
+```
+
+<Tip>
+  Use reverse-domain labels like `com.example.yourapp.console` to keep them globally unique. Puppy uses the label as the underlying `DispatchQueue` label too.
+</Tip>
+
+## Flushing pending log writes
+
+Each logger dispatches messages asynchronously on its own queue. Call `flush()` to wait until all pending messages have been processed—useful before your application exits or suspends.
+
+```swift
+let result = puppy.flush()  // waits up to 3 seconds by default
+
+switch result {
+case .success:
+    print("All messages flushed.")
+case .timeout:
+    print("Flush timed out.")
+}
+```
+
+You can pass a custom timeout in seconds:
+
+```swift
+let result = puppy.flush(5.0)  // wait up to 5 seconds
+```
+
+`flush(_:)` returns a `WaitingResult` with two cases: `.success` and `.timeout`.
+
+<Warning>
+  Do not call `flush()` from within a logger's dispatch queue or a queue that a logger depends on—it will deadlock. Call it from your application's main thread or a dedicated shutdown context.
+</Warning>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="File rotation" icon="rotate" href="/loggers/file-rotation-logger">
+    Automatically archive and rotate log files by size.
+  </Card>
+  <Card title="Custom formatters" icon="paintbrush" href="/guides/log-formatting">
+    Implement LogFormattable to control every log line's structure.
+  </Card>
+  <Card title="swift-log integration" icon="link" href="/guides/swift-log-integration">
+    Use Puppy as a backend for apple/swift-log with PuppyLogHandler.
+  </Card>
+  <Card title="Custom loggers" icon="cube" href="/guides/custom-logger">
+    Implement Loggerable to build your own transport for any backend.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

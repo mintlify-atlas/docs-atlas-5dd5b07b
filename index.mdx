@@ -1,133 +1,83 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "Puppy: flexible Swift logging across every platform"
+description: "Puppy is a cross-platform Swift logging library with console, file, syslog, and oslog transports, file rotation, custom formatters, and swift-log integration."
 ---
 
-## Setting up
+Puppy is a flexible logging library written in Swift that runs on Darwin (macOS, iOS, tvOS, watchOS, visionOS), Linux, and Windows. It lets you route log output to multiple transports simultaneously—console, file, rotating files, syslog, or Apple's unified logging system—and plug directly into the `apple/swift-log` ecosystem as a backend.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Add Puppy to your Swift project via Swift Package Manager, CocoaPods, or Carthage.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get logging to the console and a file in under five minutes.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Loggers" icon="layer-group" href="/loggers/console-logger">
+    Explore all built-in transports: console, file, file rotation, OSLog, and syslog.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="swift-log Integration" icon="link" href="/guides/swift-log-integration">
+    Use Puppy as a backend for apple/swift-log with PuppyLogHandler.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What Puppy does
 
-Everything you need to create world-class documentation.
+Puppy routes log messages to one or more transports at once. Each transport is an independent logger with its own log level, format, and dispatch queue. You compose them into a single `Puppy` instance and call one API to log everywhere.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="File rotation" icon="rotate" href="/loggers/file-rotation-logger">
+    Automatically archive and rotate log files by size, with numbering or date-UUID suffixes.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Custom formatters" icon="paintbrush" href="/guides/log-formatting">
+    Implement LogFormattable to control exactly how every log line looks.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Custom loggers" icon="cube" href="/guides/custom-logger">
+    Implement Loggerable to build your own transport for any backend.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="API reference" icon="book" href="/reference/api">
+    Full reference for every public type, protocol, and method in Puppy.
   </Card>
-</Columns>
+</CardGroup>
 
-## Make your content agent ready
+## Key features
 
-Make your docs work for humans and AI agents alike.
+- **Multiple transports** — Log to console, file, rotating file, syslog (Linux), and OSLog (Darwin) at the same time
+- **File log rotation** — Rotate by file size; archive with sequential numbering or date-UUID suffixes
+- **Cross-platform** — Darwin (macOS, iOS, tvOS, watchOS, visionOS), Linux, and Windows
+- **swift-log backend** — Drop-in `PuppyLogHandler` for projects already using `apple/swift-log`
+- **Customizable formatting** — Implement `LogFormattable` to produce any log line structure
+- **Extensible** — Implement `Loggerable` to create custom transports
+- **8 log levels** — `trace`, `verbose`, `debug`, `info`, `notice`, `warning`, `error`, `critical`
+- **Thread-safe** — Each logger runs on its own `DispatchQueue`
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
+## Get started
 
-## Need inspiration?
+<Steps>
+  <Step title="Add Puppy to your package">
+    Add the dependency to your `Package.swift`:
+    ```swift Package.swift
+    .package(url: "https://github.com/sushichop/Puppy.git", from: "0.9.0")
+    ```
+  </Step>
+  <Step title="Import and configure loggers">
+    Create one or more loggers and pass them to `Puppy`:
+    ```swift
+    import Puppy
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+    let console = ConsoleLogger("com.example.app.console", logLevel: .info)
+    let puppy = Puppy(loggers: [console])
+    ```
+  </Step>
+  <Step title="Log messages">
+    Call any of the eight log-level methods:
+    ```swift
+    puppy.info("Application started")
+    puppy.warning("Disk space below threshold")
+    puppy.error("Failed to connect to server")
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  If your project already uses `apple/swift-log`, see the [swift-log integration guide](/guides/swift-log-integration) to use Puppy as a backend without changing your logging calls.
+</Tip>

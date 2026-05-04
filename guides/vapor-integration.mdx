@@ -1,0 +1,123 @@
+---
+title: "Integrate Puppy logging into your Vapor application"
+description: "Route Vapor's swift-log output through Puppy transports—including file rotation—by registering PuppyLogHandler via Vapor's LoggingSystem.bootstrap."
+---
+
+Vapor uses `apple/swift-log` internally for all of its own log output, which means any `LogHandler` that works with swift-log also works with Vapor. Rather than calling `LoggingSystem.bootstrap` directly, Vapor provides a variant—`LoggingSystem.bootstrap(from:)`—that reads the log level from the environment and passes it to your factory closure. Puppy integrates by returning a configured `PuppyLogHandler` from that closure.
+
+## Complete example
+
+The following example configures a rotating file logger and registers it as Vapor's log backend:
+
+```swift
+import App
+import Vapor  // Vapor 4.67.4
+import Puppy
+
+let fileURL = URL(fileURLWithPath: "./server-logs/bar.log").absoluteURL
+let rotationConfig = RotationConfig(suffixExtension: .numbering,
+                                    maxFileSize: 30 * 1024 * 1024,
+                                    maxArchivedFilesCount: 5)
+let fileRotation = try FileRotationLogger("com.example.yourapp.server",
+                                          fileURL: fileURL,
+                                          rotationConfig: rotationConfig)
+let puppy = Puppy(loggers: [fileRotation])
+
+// https://docs.vapor.codes/basics/logging/
+var env = try Environment.detect()
+try LoggingSystem.bootstrap(from: &env) { (logLevel) -> (String) -> LogHandler in
+    return { label -> LogHandler in
+        var handler = PuppyLogHandler(label: label, puppy: puppy)
+        handler.logLevel = .info
+        return handler
+    }
+}
+let app = Application(env)
+defer { app.shutdown() }
+try configure(app)
+try app.run()
+```
+
+## The bootstrap closure signature
+
+Vapor's `LoggingSystem.bootstrap(from:)` expects a curried factory:
+
+```swift
+(logLevel) -> (String) -> LogHandler
+```
+
+The outer closure receives a `Logger.Level` value derived from the `LOG_LEVEL` environment variable (or Vapor's `--log` command-line flag). The inner closure receives the `label` of each `Logger` being created and must return a configured `LogHandler`. You can use `logLevel` to drive `handler.logLevel`, or override it with a fixed value as in the example above.
+
+## Rotation configuration
+
+The example uses `RotationConfig` with `.numbering` suffix extension:
+
+| Parameter | Example value | Description |
+|-----------|---------------|-------------|
+| `suffixExtension` | `.numbering` | Archived files are named `bar.log.1`, `bar.log.2`, and so on. |
+| `maxFileSize` | `30 * 1024 * 1024` | Rotate when the file reaches 30 MB. |
+| `maxArchivedFilesCount` | `5` | Keep at most 5 archived files; older ones are deleted automatically. |
+
+## Implementation workflow
+
+<Steps>
+  <Step title="Add Puppy to your Package.swift">
+    Add Puppy as a dependency and include it in your executable target:
+
+    ```swift
+    .package(url: "https://github.com/sushichop/Puppy.git", from: "0.9.0"),
+    // In your target:
+    .product(name: "Puppy", package: "Puppy"),
+    ```
+  </Step>
+  <Step title="Configure Puppy before bootstrapping">
+    Create your Puppy loggers before calling `LoggingSystem.bootstrap(from:)`. The `puppy` value is captured by the closure, so it must be fully initialized first:
+
+    ```swift
+    let fileURL = URL(fileURLWithPath: "./server-logs/bar.log").absoluteURL
+    let rotationConfig = RotationConfig(suffixExtension: .numbering,
+                                        maxFileSize: 30 * 1024 * 1024,
+                                        maxArchivedFilesCount: 5)
+    let fileRotation = try FileRotationLogger("com.example.yourapp.server",
+                                              fileURL: fileURL,
+                                              rotationConfig: rotationConfig)
+    let puppy = Puppy(loggers: [fileRotation])
+    ```
+  </Step>
+  <Step title="Bootstrap using Vapor's environment-aware API">
+    Detect the environment, then call `LoggingSystem.bootstrap(from:)`. This must happen before `Application` is created:
+
+    ```swift
+    var env = try Environment.detect()
+    try LoggingSystem.bootstrap(from: &env) { logLevel in
+        return { label in
+            var handler = PuppyLogHandler(label: label, puppy: puppy)
+            handler.logLevel = .info
+            return handler
+        }
+    }
+    ```
+  </Step>
+  <Step title="Create the Application and run">
+    After bootstrapping, create the `Application`, configure it, and run. The `defer { app.shutdown() }` call ensures Vapor cleans up resources—including flushing open file handles—when the process exits:
+
+    ```swift
+    let app = Application(env)
+    defer { app.shutdown() }
+    try configure(app)
+    try app.run()
+    ```
+  </Step>
+</Steps>
+
+<Note>
+The example targets Vapor 4.67.4. The `LoggingSystem.bootstrap(from:)` overload is part of Vapor's public API; check the Vapor changelog if you are on an older or newer version.
+</Note>
+
+<Warning>
+The directory containing the log file (e.g. `./server-logs/`) must exist and be writable by the process running your Vapor app. Create the directory in your deployment scripts or `Dockerfile` before starting the application. `FileRotationLogger` will throw if the path is not accessible.
+</Warning>
+
+<Tip>
+To also see logs in the console during development, add a `ConsoleLogger` to the `Puppy` instance alongside `fileRotation`. The same `PuppyLogHandler` routes events to all registered loggers simultaneously.
+</Tip>

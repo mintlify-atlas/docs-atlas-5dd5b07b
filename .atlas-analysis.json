@@ -1,0 +1,83 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Puppy",
+  "projectDescription": "A flexible, cross-platform Swift logging library supporting multiple transports including console, file, syslog, and oslog, with file rotation and swift-log backend integration.",
+  "theme": "palm",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Loggers",
+            "pages": [
+              "loggers/console-logger",
+              "loggers/file-logger",
+              "loggers/file-rotation-logger",
+              "loggers/os-logger",
+              "loggers/system-logger"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/log-formatting",
+              "guides/custom-logger",
+              "guides/swift-log-integration",
+              "guides/vapor-integration"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/log-levels",
+              "reference/rotation-config",
+              "reference/error-handling",
+              "reference/api"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multiple transport backends: console, file, syslog (Linux), and oslog (Darwin)",
+    "Automatic file log rotation by size with numbering or date-UUID suffix strategies",
+    "Cross-platform support: Darwin (macOS, iOS, tvOS, watchOS, visionOS), Linux, and Windows",
+    "apple/swift-log backend integration via PuppyLogHandler",
+    "Customizable log formatting through the LogFormattable protocol",
+    "Custom logger creation via the Loggerable protocol",
+    "8 log levels: trace, verbose, debug, info, notice, warning, error, critical",
+    "Thread-safe async dispatch queue per logger"
+  ],
+  "publicApiSurface": [
+    "Puppy (struct) — core logging coordinator with add/remove/log methods",
+    "ConsoleLogger — logs to standard output",
+    "FileLogger — writes logs to a file with configurable permissions and flush modes",
+    "FileRotationLogger — file logger with automatic rotation and delegation",
+    "OSLogger — logs via Apple's unified logging system (Darwin only)",
+    "SystemLogger — logs via syslog (Linux only)",
+    "PuppyLogHandler — LogHandler conformance for apple/swift-log",
+    "Loggerable (protocol) — base protocol for all logger types",
+    "FileLoggerable (protocol) — protocol for file-based loggers",
+    "LogFormattable (protocol) — protocol for custom log formatters",
+    "LogLevel (enum) — trace, verbose, debug, info, notice, warning, error, critical",
+    "RotationConfig (struct) — file rotation configuration",
+    "FileRotationLoggerDelegate (protocol) — delegate for rotation lifecycle events",
+    "FlushMode (enum) — always or manual flush control",
+    "FileWritingErrorHandlingMode (enum) — assert, print, or force error handling",
+    "FileError (enum) — typed file operation errors",
+    "WaitingResult (enum) — success or timeout result for flush"
+  ]
+}
